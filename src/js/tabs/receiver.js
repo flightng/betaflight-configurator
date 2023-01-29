@@ -17,6 +17,8 @@ import { gui_log } from "../gui_log";
 import { degToRad } from "../utils/common";
 import semver from 'semver';
 import { updateTabList } from "../utils/updateTabList";
+import * as THREE from 'three';
+import * as d3 from "d3";
 
 import CryptoES from 'crypto-es';
 
@@ -24,7 +26,7 @@ const receiver = {
     rateChartHeight: 117,
     analyticsChanges: {},
     needReboot: false,
-    elrsPassphraseEnabled: false,
+    elrsBindingPhraseEnabled: false,
 };
 
 receiver.initialize = function (callback) {
@@ -32,20 +34,20 @@ receiver.initialize = function (callback) {
 
     GUI.active_tab = 'receiver';
 
-    function lookup_elrs_passphrase(uidString) {
-        const passphraseMap = getConfig('passphrase_map').passphrase_map || {};
+    function lookupElrsBindingPhrase(uidString) {
+        const bindingPhraseMap = getConfig('binding_phrase_map').binding_phrase_map || {};
 
-        return passphraseMap[uidString] ?? 0;
+        return bindingPhraseMap[uidString] ?? 0;
     }
 
-    function save_elrs_passphrase(uidString, passphrase) {
-        const passphraseMap = getConfig('passphrase_map').passphrase_map ?? {};
+    function saveElrsBindingPhrase(uidString, bindingPhrase) {
+        const bindingPhraseMap = getConfig('binding_phrase_map').binding_phrase_map ?? {};
 
-        passphraseMap[uidString] = passphrase;
-        setConfig({'passphrase_map': passphraseMap});
+        bindingPhraseMap[uidString] = bindingPhrase;
+        setConfig({'binding_phrase_map': bindingPhraseMap});
       }
 
-    function elrs_passphrase_to_bytes(text) {
+    function elrsBindingPhraseToBytes(text) {
         let uidBytes = [0,0,0,0,0,0];
 
         if (text) {
@@ -337,30 +339,30 @@ receiver.initialize = function (callback) {
         }
 
         if (FC.FEATURE_CONFIG.features.isEnabled('RX_SPI') && FC.RX_CONFIG.rxSpiProtocol == 19 && semver.gte(FC.CONFIG.apiVersion, API_VERSION_1_45)) {
-            tab.elrsPassphraseEnabled = true;
+            tab.elrsBindingPhraseEnabled = true;
 
             const elrsUid = $('span.elrsUid');
             const elrsUidString = FC.RX_CONFIG.elrsUid.join(',');
 
             elrsUid.text(elrsUidString);
 
-            const elrsPassphrase = $('input.elrsPassphrase');
+            const elrsBindingPhrase = $('input.elrsBindingPhrase');
 
-            const passphraseString = lookup_elrs_passphrase(elrsUidString);
-            if (passphraseString) {
-                elrsPassphrase.val(passphraseString);
+            const bindingPhraseString = lookupElrsBindingPhrase(elrsUidString);
+            if (bindingPhraseString) {
+                elrsBindingPhrase.val(bindingPhraseString);
             }
-            elrsPassphrase.on('keyup', function() {
-                const passphrase = elrsPassphrase.val();
-                if (passphrase) {
-                    elrsUid.text(elrs_passphrase_to_bytes(passphrase));
+            elrsBindingPhrase.on('keyup', function() {
+                const bindingPhrase = elrsBindingPhrase.val();
+                if (bindingPhrase) {
+                    elrsUid.text(elrsBindingPhraseToBytes(bindingPhrase));
                 } else {
                     elrsUid.text("0.0.0.0.0.0");
                 }
                 updateSaveButton(true);
             });
         } else {
-            tab.elrsPassphraseEnabled = false;
+            tab.elrsBindingPhraseEnabled = false;
         }
 
         // UI Hooks
@@ -405,10 +407,13 @@ receiver.initialize = function (callback) {
             }
         }
 
-        function checkShowElrsPassphrase() {
-            $('#elrsContainer').toggle(tab.elrsPassphraseEnabled);
-            $('input.elrsUid').toggle(tab.elrsPassphraseEnabled);
+        function checkShowElrsBindingPhrase() {
+            $('#elrsContainer').toggle(tab.elrsBindingPhraseEnabled);
+            $('input.elrsUid').toggle(tab.elrsBindingPhraseEnabled);
         }
+
+        // Sort the element, if need to group, do it by lexical sort, ie. by naming of (the translated) selection text
+        $('#rxModeSelect').sortSelect(i18n.getMessage("featureNone"));
 
         $(featuresElement).filter('select').change(function () {
             const element = $(this);
@@ -417,14 +422,14 @@ receiver.initialize = function (callback) {
             if (element.attr('name') === 'rxMode') {
                 checkShowSerialRxBox();
                 checkShowSpiRxBox();
-                checkShowElrsPassphrase();
+                checkShowElrsBindingPhrase();
                 updateSaveButton(true);
             }
         });
 
         checkShowSerialRxBox();
         checkShowSpiRxBox();
-        checkShowElrsPassphrase();
+        checkShowElrsBindingPhrase();
         updateSaveButton();
 
         $('a.refresh').click(function () {
@@ -466,14 +471,14 @@ receiver.initialize = function (callback) {
                 FC.RX_CONFIG.rcSmoothingAutoFactor = parseInt($('input[name="rcSmoothingAutoFactor-number"]').val());
             }
 
-            if (tab.elrsPassphraseEnabled) {
+            if (tab.elrsBindingPhraseEnabled) {
                 const elrsUidChars = $('span.elrsUid')[0].innerText.split(',').map(uidChar => parseInt(uidChar, 10));
                 if (elrsUidChars.length === 6) {
                     FC.RX_CONFIG.elrsUid = elrsUidChars;
 
                     const elrsUid =  $('span.elrsUid')[0].innerText;
-                    const elrsPassphrase = $('input.elrsPassphrase').val();
-                    save_elrs_passphrase(elrsUid, elrsPassphrase);
+                    const elrsBindingPhrase = $('input.elrsBindingPhrase').val();
+                    saveElrsBindingPhrase(elrsUid, elrsBindingPhrase);
                 } else {
                     FC.RX_CONFIG.elrsUid = [0, 0, 0, 0, 0, 0];
                 }
@@ -715,12 +720,17 @@ receiver.initialize = function (callback) {
             }
 
             function update_ui() {
-
                 if (FC.RC.active_channels > 0) {
-
                     // update bars with latest data
                     for (let i = 0; i < FC.RC.active_channels; i++) {
-                        meterFillArray[i].css('width', `${((FC.RC.channels[i] - meterScale.min) / (meterScale.max - meterScale.min) * 100).clamp(0, 100)}%`);
+                        meterFillArray[i].css(
+                            "width",
+                            `${(
+                                ((FC.RC.channels[i] - meterScale.min) /
+                                    (meterScale.max - meterScale.min)) *
+                                100
+                            ).clamp(0, 100)}%`,
+                        );
                         meterLabelArray[i].text(FC.RC.channels[i]);
                     }
 
@@ -740,43 +750,49 @@ receiver.initialize = function (callback) {
                             rxPlotData[i].shift();
                         }
                     }
-
                 }
 
                 // update required parts of the plot
-                widthScale = d3.scale.linear().
-                    domain([(samples - 299), samples]);
+                widthScale = d3.scaleLinear().domain([samples - 299, samples]);
 
-                heightScale = d3.scale.linear().
-                    domain([800, 2200]);
+                heightScale = d3.scaleLinear().domain([800, 2200]);
 
                 update_receiver_plot_size();
 
-                const xGrid = d3.svg.axis().
-                    scale(widthScale).
-                    orient("bottom").
-                    tickSize(-height, 0, 0).
-                    tickFormat("");
+                const xGrid = d3
+                    .axisBottom()
+                    .scale(widthScale)
+                    .tickSize(-height)
+                    .tickFormat("");
 
-                const yGrid = d3.svg.axis().
-                    scale(heightScale).
-                    orient("left").
-                    tickSize(-width, 0, 0).
-                    tickFormat("");
+                const yGrid = d3
+                    .axisLeft()
+                    .scale(heightScale)
+                    .tickSize(-width)
+                    .tickFormat("");
 
-                const xAxis = d3.svg.axis().
-                    scale(widthScale).
-                    orient("bottom").
-                    tickFormat(function (d) {return d;});
+                const xAxis = d3
+                    .axisBottom()
+                    .scale(widthScale)
+                    .tickFormat(function (d) {
+                        return d;
+                    });
 
-                const yAxis = d3.svg.axis().
-                    scale(heightScale).
-                    orient("left").
-                    tickFormat(function (d) {return d;});
+                const yAxis = d3
+                    .axisLeft()
+                    .scale(heightScale)
+                    .tickFormat(function (d) {
+                        return d;
+                    });
 
-                const line = d3.svg.line().
-                    x(function (d) {return widthScale(d[0]);}).
-                    y(function (d) {return heightScale(d[1]);});
+                const line = d3
+                    .line()
+                    .x(function (d) {
+                        return widthScale(d[0]);
+                    })
+                    .y(function (d) {
+                        return heightScale(d[1]);
+                    });
 
                 svg.select(".x.grid").call(xGrid);
                 svg.select(".y.grid").call(yGrid);
@@ -784,9 +800,13 @@ receiver.initialize = function (callback) {
                 svg.select(".y.axis").call(yAxis);
 
                 const data = svg.select("g.data");
-                const lines = data.selectAll("path").data(rxPlotData, function (d, i) {return i;});
+                const lines = data
+                    .selectAll("path")
+                    .data(rxPlotData, function (d, i) {
+                        return i;
+                    });
                 lines.enter().append("path").attr("class", "line");
-                lines.attr('d', line);
+                lines.attr("d", line);
 
                 samples++;
             }

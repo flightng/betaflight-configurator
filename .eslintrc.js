@@ -24,14 +24,11 @@ module.exports = {
         'no-duplicate-imports': 'error',
     },
     globals: {
-        d3: true,
-        THREE: true,
         cordova: true,
         cordovaUI: true,
         ol: true,
         wNumb: true,
         ConfigStorage: true,
-        objectHash: true,
         // start cordova bindings, remove after cordova is removed/replace/modularized
         cordova_serial: true,
         fileChooser: true,
